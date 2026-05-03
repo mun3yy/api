@@ -218,26 +218,9 @@ async def get_linked(user_id: str):
 
 @app.post("/save_token")
 async def save_token(data: TokenData):
-    """ Validates the token with the game API via Proxy before saving """
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.get(
-                f"{PROXY_URL}/user",
-                headers={
-                    "x-auth-token": data.token,
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                }
-            )
-            if response.status_code != 200:
-                raise HTTPException(status_code=401, detail="Invalid app.rt token. Please check it.")
-            
-            user_info = response.json().get("user", {})
-            username = user_info.get("robloxUsername", "Unknown")
-            
-            USER_TOKENS[data.user_id] = data.token
-            return {"status": "success", "username": username}
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Validation failed: {str(e)}")
+    """ Skips validation and just saves the token """
+    USER_TOKENS[data.user_id] = data.token
+    return {"status": "success", "username": "Linked Account"}
 
 if __name__ == "__main__":
     import uvicorn
