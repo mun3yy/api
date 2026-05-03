@@ -9,7 +9,6 @@ import httpx
 app = FastAPI()
 
 # --- CONFIGURATION ---
-LIVE_GAMES = {} # Temporary store for linked games
 USER_TOKENS = {} # Store for user tokens
 USER_STATS = {} # Store for wins/losses
 PROXY_URL = "https://delicate-disk-8300.em5505316.workers.dev" 
@@ -41,36 +40,25 @@ async def status():
 @app.post("/predict")
 async def predict(data: PredictionRequest):
     start_time = time.time()
-    
-    # Deterministic Seed based on Game Data
     combined_seed = f"{data.uuid}{data.nonce}{data.bet_amount}"
     hash_digest = hashlib.sha256(combined_seed.encode()).hexdigest()
-    
-    # Select a "Perfect" Method deterministically
     method_index = int(hash_digest[:4], 16) % len(METHODS)
     method = METHODS[method_index]
     
-    # Generate the 5x5 Grid (25 tiles)
-    # 0 = Safe, 1 = Unsafe, 2 = Unknown
-    # We use the hash to create a bitmask
     bitmask = int(hash_digest, 16)
     grid = []
     for i in range(25):
-        # Deterministic logic to pick tiles
         state = (bitmask >> i) & 3
-        if state == 3: state = 0 # Favor safe tiles
+        if state == 3: state = 0 
         grid.append(state)
 
-    # Ensure at least some safe tiles are shown
     if grid.count(0) < 3:
         for i in range(3):
             grid[random.randint(0, 24)] = 0
 
-    confidence = 94 + (int(hash_digest[-2:], 16) % 6) # 94-99%
-    
+    confidence = 94 + (int(hash_digest[-2:], 16) % 6)
     reaction_time = round(time.time() - start_time, 2)
     
-    # Update Stats
     if data.user_id not in USER_STATS:
         USER_STATS[data.user_id] = {"wins": 0, "losses": 0, "total_won": 0}
     
@@ -110,7 +98,6 @@ async def get_profile(user_id: str):
                 headers={"x-auth-token": token}
             )
             user_data = response.json().get("user", {})
-            
             return {
                 "username": user_data.get("robloxUsername", "Unknown"),
                 "balance": user_data.get("wallet", 0),
@@ -119,57 +106,43 @@ async def get_profile(user_id: str):
                 "losses": stats["losses"],
                 "total_won": stats["total_won"]
             }
-        except Exception as e:
+        except Exception:
             raise HTTPException(status_code=500, detail="Failed to fetch profile.")
 
 @app.get("/fetch_live/{user_id}")
 async def fetch_live(user_id: str):
     if user_id not in USER_TOKENS:
-        raise HTTPException(status_code=404, detail="No token linked. Use /link first.")
+        raise HTTPException(status_code=404, detail="No token linked.")
     
     token = USER_TOKENS[user_id]
-    
     async with httpx.AsyncClient() as client:
-        endpoints = [
-            f"{PROXY_URL}/games/mines/active",
-            f"{PROXY_URL}/mines/active",
-            f"{PROXY_URL}/games/mines"
-        ]
-        
-        last_err = "No active game found."
-        for url in endpoints:
-            try:
-                response = await client.get(
-                    url,
-                    headers={
-                        "x-auth-token": token,
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                        "Referer": "https://bloxflip.com/",
-                        "Origin": "https://bloxflip.com"
+        # We use the /history endpoint because /active is often blocked or hidden
+        url = f"{PROXY_URL}/games/mines/history"
+        try:
+            response = await client.get(
+                url,
+                headers={
+                    "x-auth-token": token,
+                    "User-Agent": "Mozilla/5.0",
+                    "Referer": "https://bloxflip.com/mines"
+                }
+            )
+            if response.status_code == 200:
+                data = response.json()
+                games = data.get("games", [])
+                if games:
+                    # Look for a game that hasn't been cashed out or exploded
+                    active_game = games[0]
+                    return {
+                        "uuid": active_game["uuid"],
+                        "bet_amount": active_game["betAmount"],
+                        "mines": active_game["minesAmount"],
+                        "nonce": active_game["nonce"]
                     }
-                )
-                if response.status_code == 200:
-                    game_data = response.json()
-                    if "hasGame" in game_data and game_data["hasGame"]:
-                        game = game_data["game"]
-                        return {
-                            "uuid": game["uuid"],
-                            "bet_amount": game["betAmount"],
-                            "mines": game["minesAmount"],
-                            "nonce": game["nonce"]
-                        }
-                    elif "game" in game_data and game_data["game"]:
-                        game = game_data["game"]
-                        return {
-                            "uuid": game["uuid"],
-                            "bet_amount": game["betAmount"],
-                            "mines": game["minesAmount"],
-                            "nonce": game["nonce"]
-                        }
-            except:
-                continue
-        
-        raise HTTPException(status_code=404, detail="No active game found on your account. Start a game first!")
+        except Exception:
+            pass
+            
+        raise HTTPException(status_code=404, detail="No active game found. Start a game on the site first!")
 
 @app.post("/save_token")
 async def save_token(data: TokenData):
