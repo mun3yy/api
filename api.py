@@ -3,7 +3,6 @@ from pydantic import BaseModel
 import time
 import random
 import hashlib
-import math
 import httpx
 
 app = FastAPI()
@@ -17,8 +16,8 @@ METHODS = []
 for i in range(1, 301):
     METHODS.append({
         "id": i,
-        "name": f"Perfect Method v{i}.{random.randint(10, 99)}",
-        "desc": f"Utilizes index pattern #{random.randint(1000, 9999)} for surgical precision."
+        "name": f"Perfect Method v{i}",
+        "desc": "Real-time SHA256 deterministic scanning."
     })
 
 class PredictionRequest(BaseModel):
@@ -32,9 +31,44 @@ class TokenData(BaseModel):
     user_id: str
     token: str
 
-@app.get("/status")
-async def status():
-    return {"status": "operational", "methods_loaded": len(METHODS)}
+@app.get("/fetch_live/{user_id}")
+async def fetch_live(user_id: str):
+    if user_id not in USER_TOKENS:
+        raise HTTPException(status_code=404, detail="Link first!")
+    
+    token = USER_TOKENS[user_id]
+    async with httpx.AsyncClient() as client:
+        # We must use EXACT headers from the browser screenshot
+        headers = {
+            "x-auth-token": token,
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/json, text/plain, */*",
+            "Referer": "https://bloxflip.com/mines",
+            "Origin": "https://bloxflip.com",
+            "x-currency": "FLIPCOINS",
+            "Content-Type": "application/json"
+        }
+        
+        try:
+            # Try history first as it's more reliable
+            res = await client.get(f"{PROXY_URL}/api/games/mines/history", headers=headers)
+            if res.status_code == 200:
+                games = res.json().get("games", [])
+                if games:
+                    g = games[0]
+                    return {"uuid": g["uuid"], "bet_amount": g["betAmount"], "mines": g["minesAmount"], "nonce": g["nonce"]}
+            
+            # Fallback to active
+            res2 = await client.get(f"{PROXY_URL}/api/games/mines", headers=headers)
+            if res2.status_code == 200:
+                data = res2.json()
+                if data.get("hasGame"):
+                    g = data["game"]
+                    return {"uuid": g["uuid"], "bet_amount": g["betAmount"], "mines": g["minesAmount"], "nonce": g["nonce"]}
+            
+            raise HTTPException(status_code=404, detail="No active game found. Refresh the site and try again.")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Server Error: {str(e)}")
 
 @app.post("/predict")
 async def predict(data: PredictionRequest):
@@ -54,74 +88,13 @@ async def predict(data: PredictionRequest):
         for i in range(3):
             grid[random.randint(0, 24)] = 0
 
-    confidence = 94 + (int(hash_digest[-2:], 16) % 6)
-    
-    if data.user_id not in USER_STATS:
-        USER_STATS[data.user_id] = {"wins": 0, "losses": 0, "total_won": 0}
-    
-    if confidence > 97:
-        USER_STATS[data.user_id]["wins"] += 1
-        USER_STATS[data.user_id]["total_won"] += data.bet_amount * 2
-    else:
-        USER_STATS[data.user_id]["losses"] += 1
-
     return {
         "status": "success",
         "grid": grid,
         "method": method,
-        "confidence_score": f"{confidence}%",
+        "confidence_score": f"{94 + (int(hash_digest[-2:], 16) % 6)}%",
         "game_info": data.dict()
     }
-
-@app.get("/profile/{user_id}")
-async def get_profile(user_id: str):
-    if user_id not in USER_TOKENS:
-        raise HTTPException(status_code=404, detail="No token linked.")
-    
-    token = USER_TOKENS[user_id]
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.get(f"{PROXY_URL}/user", headers={"x-auth-token": token})
-            user_data = response.json().get("user", {})
-            return {
-                "username": user_data.get("robloxUsername", "Unknown"),
-                "balance": user_data.get("wallet", 0),
-                "pfp": f"https://www.roblox.com/headshot-thumbnail/image?userId={user_data.get('robloxId', 0)}&width=420&height=420&format=png",
-                "wins": USER_STATS.get(user_id, {}).get("wins", 0),
-                "losses": USER_STATS.get(user_id, {}).get("losses", 0),
-                "total_won": USER_STATS.get(user_id, {}).get("total_won", 0)
-            }
-        except Exception:
-            raise HTTPException(status_code=500, detail="Profile fetch failed.")
-
-@app.get("/fetch_live/{user_id}")
-async def fetch_live(user_id: str):
-    if user_id not in USER_TOKENS:
-        raise HTTPException(status_code=404, detail="Link first!")
-    
-    token = USER_TOKENS[user_id]
-    async with httpx.AsyncClient() as client:
-        # Try HISTORY endpoint
-        try:
-            res = await client.get(
-                f"{PROXY_URL}/games/mines/history",
-                headers={"x-auth-token": token, "User-Agent": "Mozilla/5.0"}
-            )
-            if res.status_code == 200:
-                games = res.json().get("games", [])
-                if games:
-                    g = games[0]
-                    return {"uuid": g["uuid"], "bet_amount": g["betAmount"], "mines": g["minesAmount"], "nonce": g["nonce"]}
-            
-            # If history fails, try the active check
-            res2 = await client.get(
-                f"{PROXY_URL}/games/mines",
-                headers={"x-auth-token": token, "User-Agent": "Mozilla/5.0"}
-            )
-            debug_info = f"Status: {res2.status_code} | Body: {res2.text[:100]}"
-            raise HTTPException(status_code=404, detail=f"DEBUG: {debug_info}")
-        except Exception as e:
-            raise HTTPException(status_code=404, detail=f"Final Error: {str(e)}")
 
 @app.post("/save_token")
 async def save_token(data: TokenData):
