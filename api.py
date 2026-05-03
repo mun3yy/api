@@ -12,6 +12,7 @@ app = FastAPI()
 LIVE_GAMES = {} # Temporary store for linked games
 USER_TOKENS = {} # Store for user tokens
 USER_STATS = {} # Store for wins/losses
+PROXY_URL = "https://delicate-disk-8300.em5505316.workers.dev" 
 
 # --- THE 300 METHODS ---
 # We generate 300 unique method names and descriptions
@@ -135,9 +136,9 @@ async def get_profile(user_id: str):
     
     async with httpx.AsyncClient() as client:
         try:
-            # Bloxflip User Info Endpoint
+            # Bloxflip User Info Endpoint via Proxy
             response = await client.get(
-                "https://api.bloxflip.com/user",
+                f"{PROXY_URL}/user",
                 headers={"x-auth-token": token}
             )
             user_data = response.json().get("user", {})
@@ -167,7 +168,7 @@ async def fetch_live(user_id: str):
         try:
             # Enhanced headers to bypass Cloudflare/Bot detection
             response = await client.get(
-                "https://api.bloxflip.com/games/mines/active",
+                f"{PROXY_URL}/games/mines/active",
                 headers={
                     "x-auth-token": token,
                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -217,10 +218,26 @@ async def get_linked(user_id: str):
 
 @app.post("/save_token")
 async def save_token(data: TokenData):
-    """ Skips validation for now to bypass IP blocks """
-    USER_TOKENS[data.user_id] = data.token
-    print(f"Force-saved token for user {data.user_id}")
-    return {"status": "success", "username": "Linked Account"}
+    """ Validates the token with the game API via Proxy before saving """
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(
+                f"{PROXY_URL}/user",
+                headers={
+                    "x-auth-token": data.token,
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                }
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=401, detail="Invalid app.rt token. Please check it.")
+            
+            user_info = response.json().get("user", {})
+            username = user_info.get("robloxUsername", "Unknown")
+            
+            USER_TOKENS[data.user_id] = data.token
+            return {"status": "success", "username": username}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Validation failed: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
