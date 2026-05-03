@@ -7,6 +7,9 @@ import math
 
 app = FastAPI()
 
+# --- CONFIGURATION ---
+LIVE_GAMES = {} # Temporary store for linked games
+
 # --- THE 300 METHODS ---
 # We generate 300 unique method names and descriptions
 METHOD_NAMES = [
@@ -102,6 +105,20 @@ async def status():
         "patterns_indexed": "1,048,576 Trillion (Procedural)",
         "server_load": "0.14%"
     }
+
+@app.post("/link_game")
+async def link_game(data: GameData):
+    """ The linker calls this to upload live game data """
+    LIVE_GAMES[data.user_id] = data
+    print(f"Linked game for user {data.user_id}")
+    return {"status": "linked"}
+
+@app.get("/get_linked/{user_id}")
+async def get_linked(user_id: str):
+    """ The bot calls this to see if the user has a live game """
+    if user_id in LIVE_GAMES:
+        return LIVE_GAMES[user_id]
+    raise HTTPException(status_code=404, detail="No linked game found")
 
 if __name__ == "__main__":
     import uvicorn
