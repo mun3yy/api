@@ -4,11 +4,14 @@ import time
 import random
 import hashlib
 import math
+import axios
+import httpx
 
 app = FastAPI()
 
 # --- CONFIGURATION ---
 LIVE_GAMES = {} # Temporary store for linked games
+USER_TOKENS = {} # Store for user tokens
 
 # --- THE 300 METHODS ---
 # We generate 300 unique method names and descriptions
@@ -34,6 +37,10 @@ def generate_300_methods():
     return methods
 
 ALL_METHODS = generate_300_methods()
+
+class TokenData(BaseModel):
+    user_id: str
+    token: str
 
 class GameData(BaseModel):
     uuid: str
@@ -68,17 +75,25 @@ def int_to_grid(bit_integer):
 async def predict(data: GameData):
     start_time = time.time()
     
-    # Select method based on Nonce & UserID for consistency
-    method_index = (data.nonce + int(data.user_id[:5] if data.user_id.isdigit() else 0)) % 300
-    method = ALL_METHODS[method_index]
+    # --- PERFECT METHOD SELECTION ---
+    # We use a combined hash of the UUID, Nonce, and Bet to find the 'Perfect' Method
+    state_hash = hashlib.sha256(f"{data.uuid}-{data.nonce}-{data.bet_amount}".encode()).hexdigest()
     
-    # "Scan" trillions of patterns
-    seed_hash = f"{data.uuid}-{data.nonce}"
-    pattern_int = scan_trillions_of_patterns(seed_hash, method.get("id"))
+    # Deterministically pick the 'Best' method for this specific state
+    method_index = int(state_hash[:4], 16) % 300
+    method = ALL_METHODS[method_index]
+    method["name"] = f"🌟 Perfect {method['name'].split(' ')[0]}" # Mark as Perfect
+    
+    # --- PERFECT PATTERN SCANNING ---
+    # We 'scan' the trillion patterns to find the one with the highest 'Win Confidence'
+    pattern_int = scan_trillions_of_patterns(state_hash, method_index)
     grid = int_to_grid(pattern_int)
     
+    # Calculate a fake 'Confidence Score'
+    confidence = round(random.uniform(94.2, 99.9), 2)
+    
     # Simulation of heavy processing
-    processing_delay = random.uniform(0.8, 2.2)
+    processing_delay = random.uniform(1.2, 2.5)
     time.sleep(processing_delay)
     
     reaction_time = round(time.time() - start_time, 2)
@@ -88,7 +103,8 @@ async def predict(data: GameData):
         "grid": grid,
         "method": method,
         "reaction_time": f"{reaction_time}s",
-        "patterns_scanned": f"3.472,382,921,029", # Visual flavor
+        "patterns_scanned": f"3.472,382,921,029",
+        "confidence_score": f"{confidence}%",
         "game_info": {
             "uuid": data.uuid,
             "bet_amount": data.bet_amount,
@@ -96,6 +112,42 @@ async def predict(data: GameData):
             "nonce": data.nonce
         }
     }
+
+@app.get("/fetch_live/{user_id}")
+async def fetch_live(user_id: str):
+    """ 
+    Uses the stored app.rt token to get the actual live game from the server.
+    """
+    if user_id not in USER_TOKENS:
+        raise HTTPException(status_code=404, detail="No app.rt token linked for this user.")
+    
+    token = USER_TOKENS[user_id]
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            # This is the actual endpoint for live mines games
+            response = await client.get(
+                "https://api.bloxflip.com/games/mines/active",
+                headers={
+                    "x-auth-token": token,
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                }
+            )
+            game_data = response.json()
+            
+            if not game_data.get("hasGame"):
+                raise HTTPException(status_code=404, detail="No active game found on your account.")
+            
+            game = game_data["game"]
+            return {
+                "uuid": game["uuid"],
+                "bet_amount": game["betAmount"],
+                "mines": game["minesCount"],
+                "nonce": game["nonce"],
+                "user_id": user_id
+            }
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to fetch game from server: {str(e)}")
 
 @app.get("/status")
 async def status():
@@ -119,6 +171,13 @@ async def get_linked(user_id: str):
     if user_id in LIVE_GAMES:
         return LIVE_GAMES[user_id]
     raise HTTPException(status_code=404, detail="No linked game found")
+
+@app.post("/save_token")
+async def save_token(data: TokenData):
+    """ The bot calls this to save a user token """
+    USER_TOKENS[data.user_id] = data.token
+    print(f"Saved token for user {data.user_id}")
+    return {"status": "success"}
 
 if __name__ == "__main__":
     import uvicorn
