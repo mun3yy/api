@@ -11,6 +11,7 @@ app = FastAPI()
 # --- CONFIGURATION ---
 LIVE_GAMES = {} # Temporary store for linked games
 USER_TOKENS = {} # Store for user tokens
+USER_STATS = {} # Store for wins/losses
 
 # --- THE 300 METHODS ---
 # We generate 300 unique method names and descriptions
@@ -97,6 +98,17 @@ async def predict(data: GameData):
     
     reaction_time = round(time.time() - start_time, 2)
     
+    # Update Stats (Simulated tracking)
+    if data.user_id not in USER_STATS:
+        USER_STATS[data.user_id] = {"wins": 0, "losses": 0, "total_won": 0}
+    
+    # We'll assume a 'win' if the confidence is high for now
+    if confidence > 97:
+        USER_STATS[data.user_id]["wins"] += 1
+        USER_STATS[data.user_id]["total_won"] += data.bet_amount * 2
+    else:
+        USER_STATS[data.user_id]["losses"] += 1
+
     return {
         "status": "success",
         "grid": grid,
@@ -111,6 +123,35 @@ async def predict(data: GameData):
             "nonce": data.nonce
         }
     }
+
+@app.get("/profile/{user_id}")
+async def get_profile(user_id: str):
+    """ Fetches user profile data from the game and our stats """
+    if user_id not in USER_TOKENS:
+        raise HTTPException(status_code=404, detail="No token linked.")
+    
+    token = USER_TOKENS[user_id]
+    stats = USER_STATS.get(user_id, {"wins": 0, "losses": 0, "total_won": 0})
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            # Bloxflip User Info Endpoint
+            response = await client.get(
+                "https://api.bloxflip.com/user",
+                headers={"x-auth-token": token}
+            )
+            user_data = response.json().get("user", {})
+            
+            return {
+                "username": user_data.get("robloxUsername", "Unknown"),
+                "balance": user_data.get("wallet", 0),
+                "pfp": f"https://www.roblox.com/headshot-thumbnail/image?userId={user_data.get('robloxId', 0)}&width=420&height=420&format=png",
+                "wins": stats["wins"],
+                "losses": stats["losses"],
+                "total_won": stats["total_won"]
+            }
+        except Exception as e:
+            raise HTTPException(status_code=500, detail="Failed to fetch profile.")
 
 @app.get("/fetch_live/{user_id}")
 async def fetch_live(user_id: str):
