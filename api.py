@@ -182,9 +182,21 @@ async def set_bot_token(data: BotTokenData):
 
 @app.post("/save_token")
 async def save_token(data: TokenData):
-    """Link a specific user's own bloxflip token (optional fallback)."""
+    """Link a specific user's own bloxflip token and return profile data."""
+    try:
+        # Fetch user profile to verify token and get balance/avatar
+        user_info = await proxy_get("/api/user", data.token)
+        user_data = user_info.get("user") or user_info
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid token: {str(e)}")
+
     USER_TOKENS[data.user_id] = data.token
-    return {"status": "success"}
+    return {
+        "status": "success",
+        "username": user_data.get("robloxUsername") or user_data.get("username") or "Unknown",
+        "balance": user_data.get("wallet") or 0,
+        "avatar": user_data.get("avatar") or ""
+    }
 
 @app.get("/fetch_live/{user_id}")
 async def fetch_live(user_id: str):
@@ -210,7 +222,7 @@ async def fetch_live(user_id: str):
     # 2. Fallback: pull history, grab the most recent unfinished game
     if not active_game:
         try:
-            data = await proxy_get("/api/games/mines/history?page=0&limit=20", token)
+            data = await proxy_get("/api/games/mines/history", token)
             raw_games = data.get("games") or data.get("data") or (data if isinstance(data, list) else [])
             if raw_games:
                 store_history(user_id, raw_games)
@@ -241,16 +253,13 @@ async def get_history(user_id: str, limit: int = Query(50, le=200)):
         raise HTTPException(status_code=401, detail="No token set.")
 
     all_raw = []
-    for page in range(5):  # pull 5 pages = ~100 games
-        try:
-            data = await proxy_get(f"/api/games/mines/history?page={page}&limit=20", token)
-            raw = data.get("games") or data.get("data") or (data if isinstance(data, list) else [])
-            if not raw:
-                break
+    try:
+        data = await proxy_get("/api/games/mines/history", token)
+        raw = data.get("games") or data.get("data") or (data if isinstance(data, list) else [])
+        if raw:
             all_raw.extend(raw)
-        except Exception as e:
-            print(f"Proxy fetch failed on page {page}. Error: {str(e)}")
-            break  # stop at first failed page
+    except Exception as e:
+        print(f"Proxy fetch failed. Error: {str(e)}")
 
     if not all_raw:
         raise HTTPException(status_code=404, detail="No history found. Make sure the token is valid and proxy is working.")
