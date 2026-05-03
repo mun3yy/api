@@ -9,7 +9,6 @@ app = FastAPI()
 
 # --- CONFIGURATION ---
 USER_TOKENS = {} 
-USER_STATS = {} 
 PROXY_URL = "https://delicate-disk-8300.em5505316.workers.dev" 
 
 METHODS = []
@@ -31,49 +30,12 @@ class TokenData(BaseModel):
     user_id: str
     token: str
 
-@app.get("/fetch_live/{user_id}")
-async def fetch_live(user_id: str):
-    if user_id not in USER_TOKENS:
-        raise HTTPException(status_code=404, detail="Link first!")
-    
-    token = USER_TOKENS[user_id]
-    async with httpx.AsyncClient() as client:
-        # We must use EXACT headers from the browser screenshot
-        headers = {
-            "x-auth-token": token,
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept": "application/json, text/plain, */*",
-            "Referer": "https://bloxflip.com/mines",
-            "Origin": "https://bloxflip.com",
-            "x-currency": "FLIPCOINS",
-            "Content-Type": "application/json"
-        }
-        
-        try:
-            # Try history first as it's more reliable
-            res = await client.get(f"{PROXY_URL}/api/games/mines/history", headers=headers)
-            if res.status_code == 200:
-                games = res.json().get("games", [])
-                if games:
-                    g = games[0]
-                    return {"uuid": g["uuid"], "bet_amount": g["betAmount"], "mines": g["minesAmount"], "nonce": g["nonce"]}
-            
-            # Fallback to active
-            res2 = await client.get(f"{PROXY_URL}/api/games/mines", headers=headers)
-            if res2.status_code == 200:
-                data = res2.json()
-                if data.get("hasGame"):
-                    g = data["game"]
-                    return {"uuid": g["uuid"], "bet_amount": g["betAmount"], "mines": g["minesAmount"], "nonce": g["nonce"]}
-            
-            raise HTTPException(status_code=404, detail="No active game found. Refresh the site and try again.")
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Server Error: {str(e)}")
-
 @app.post("/predict")
 async def predict(data: PredictionRequest):
     combined_seed = f"{data.uuid}{data.nonce}{data.bet_amount}"
     hash_digest = hashlib.sha256(combined_seed.encode()).hexdigest()
+    
+    # Deterministic Selection
     method_index = int(hash_digest[:4], 16) % len(METHODS)
     method = METHODS[method_index]
     
@@ -95,6 +57,33 @@ async def predict(data: PredictionRequest):
         "confidence_score": f"{94 + (int(hash_digest[-2:], 16) % 6)}%",
         "game_info": data.dict()
     }
+
+@app.get("/fetch_live/{user_id}")
+async def fetch_live(user_id: str):
+    if user_id not in USER_TOKENS:
+        raise HTTPException(status_code=404, detail="Link first!")
+    
+    token = USER_TOKENS[user_id]
+    async with httpx.AsyncClient() as client:
+        headers = {
+            "x-auth-token": token,
+            "User-Agent": "Mozilla/5.0",
+            "Referer": "https://bloxflip.com/mines",
+            "x-currency": "FLIPCOINS"
+        }
+        
+        try:
+            # Check history
+            res = await client.get(f"{PROXY_URL}/api/games/mines/history", headers=headers)
+            if res.status_code == 200:
+                games = res.json().get("games", [])
+                if games:
+                    g = games[0]
+                    return {"uuid": g["uuid"], "bet_amount": g["betAmount"], "mines": g["minesAmount"], "nonce": g["nonce"]}
+        except:
+            pass
+            
+        raise HTTPException(status_code=404, detail="Auto-fetch failed. Please enter your Game ID and Nonce manually!")
 
 @app.post("/save_token")
 async def save_token(data: TokenData):
