@@ -4,7 +4,6 @@ import time
 import random
 import hashlib
 import math
-import axios
 import httpx
 
 app = FastAPI()
