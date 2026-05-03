@@ -248,7 +248,8 @@ async def get_history(user_id: str, limit: int = Query(50, le=200)):
             if not raw:
                 break
             all_raw.extend(raw)
-        except Exception:
+        except Exception as e:
+            print(f"Proxy fetch failed on page {page}. Error: {str(e)}")
             break  # stop at first failed page
 
     if not all_raw:
