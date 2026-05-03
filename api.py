@@ -165,12 +165,15 @@ async def fetch_live(user_id: str):
     
     async with httpx.AsyncClient() as client:
         try:
-            # This is the actual endpoint for live mines games
+            # Enhanced headers to bypass Cloudflare/Bot detection
             response = await client.get(
                 "https://api.bloxflip.com/games/mines/active",
                 headers={
                     "x-auth-token": token,
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "Accept": "application/json",
+                    "Referer": "https://bloxflip.com/",
+                    "Origin": "https://bloxflip.com"
                 }
             )
             game_data = response.json()
@@ -214,10 +217,28 @@ async def get_linked(user_id: str):
 
 @app.post("/save_token")
 async def save_token(data: TokenData):
-    """ The bot calls this to save a user token """
-    USER_TOKENS[data.user_id] = data.token
-    print(f"Saved token for user {data.user_id}")
-    return {"status": "success"}
+    """ Validates the token with the game API before saving """
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(
+                "https://api.bloxflip.com/user",
+                headers={
+                    "x-auth-token": data.token,
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "Referer": "https://bloxflip.com/",
+                    "Origin": "https://bloxflip.com"
+                }
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=401, detail="Invalid app.rt token. Please check it.")
+            
+            user_info = response.json().get("user", {})
+            username = user_info.get("robloxUsername", "Unknown")
+            
+            USER_TOKENS[data.user_id] = data.token
+            return {"status": "success", "username": username}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Validation failed: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
