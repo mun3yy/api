@@ -59,9 +59,10 @@ def get_token(user_id: str) -> str:
     return USER_TOKENS.get(user_id) or BOT_TOKEN
 
 def build_headers(token: str) -> dict:
+    auth_val = f"Bearer {token}" if not token.startswith("Bearer ") else token
     return {
         "x-auth-token": token,
-        "Authorization": token,  # Added this because the proxy explicitly requested it
+        "Authorization": auth_val,
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Referer": "https://bloxflip.com/mines",
         "Origin": "https://bloxflip.com",
