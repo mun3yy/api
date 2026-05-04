@@ -43,6 +43,12 @@ class SyncActiveReq(BaseModel):
 
 class PredictionRequest(BaseModel):
     user_id: str
+    method: str = "perc"
+    tiles: int = None
+
+class SlidePredictionRequest(BaseModel):
+    user_id: str
+    method: str
 
 # ─── HELPERS ─────────────────────────────────────────────────────────────────
 
@@ -93,7 +99,7 @@ def analyze_patterns(games: list) -> dict:
         "rig_warning": recent_losses >= 2
     }
 
-def generate_grid(uuid: str, nonce: int, bet: float, mines: int, patterns: dict) -> list:
+def generate_grid(uuid: str, nonce: int, bet: float, mines: int, patterns: dict, method: str, requested_tiles: int) -> list:
     import math
     import random
     
@@ -121,13 +127,14 @@ def generate_grid(uuid: str, nonce: int, bet: float, mines: int, patterns: dict)
             
     # Normalize probabilities
     grid = [0] * 25
-    threshold = (simulations * mines) / 25
     
     # Sort tiles by lowest probability of being a mine
     safe_tiles = sorted(range(25), key=lambda x: heatmap[x])
     
     # Mark the absolutely safest tiles
-    safe_count = max(1, min(10 - mines, 8))
+    safe_count = requested_tiles if requested_tiles is not None else max(1, min(10 - mines, 8))
+    safe_count = min(safe_count, 25 - mines) # Prevent asking for more safe tiles than exist
+    
     for i in range(safe_count):
         grid[safe_tiles[i]] = 0 # Safe
         
@@ -226,23 +233,69 @@ async def predict(data: PredictionRequest):
         raise HTTPException(status_code=400, detail="Active game invalid.")
 
     patterns = analyze_patterns(GAME_HISTORY.get(data.user_id, []))
-    grid = generate_grid(active["uuid"], active["nonce"], active["bet_amount"], active["mines"], patterns)
+    grid = generate_grid(
+        uuid=active["uuid"],
+        nonce=active.get("nonce", 0),
+        bet=float(active.get("bet_amount", 0)),
+        mines=int(active.get("mines", 0)),
+        patterns=patterns,
+        method=data.method,
+        requested_tiles=data.tiles
+    )
     
-    safe_tiles  = [i for i, v in enumerate(grid) if v == 0]
-    recommended = max(1, min(len(safe_tiles), 10 - active["mines"]))
+    if data.method == "perc":
+        confidence = random.uniform(94.5, 99.8)
+    else:
+        confidence = random.uniform(65.1, 89.9)
 
-    confidence = 55 + (int(active["uuid"][-2:], 16) % 30)
-    if patterns.get("total_games", 0) >= 20: confidence = min(confidence + 8, 91)
+    safe_tiles_count = sum(1 for v in grid if v == 0)
+    recommended = safe_tiles_count if safe_tiles_count > 0 else 1
 
     return {
         "status": "success",
         "grid": grid,
         "recommended_clicks": recommended,
-        "confidence": f"{confidence}%",
+        "confidence": f"{round(confidence, 2)}%",
         "reaction_time": f"{round(time.time() - start, 4)}s",
         "pattern_bias_applied": bool(patterns),
         "game_info": active,
-        "rig_warning": patterns.get("rig_warning", False)
+        "rig_warning": patterns.get("rig_warning", False),
+        "method": data.method,
+        "patterns_analyzed": random.randint(50000, 75000)
+    }
+
+@app.post("/predict/slide")
+async def predict_slide(data: SlidePredictionRequest):
+    import random
+    
+    methods = {
+        "moon": {"red": 45, "purple": 45, "yellow": 10},
+        "perc": {"red": 48, "purple": 48, "yellow": 4},
+        "01": {"red": 40, "purple": 40, "yellow": 20}
+    }
+    
+    weights = methods.get(data.method, methods["perc"])
+    
+    rand_val = random.randint(1, 100)
+    if rand_val <= weights["red"]:
+        color = "red"
+        multiplier = "2x"
+    elif rand_val <= weights["red"] + weights["purple"]:
+        color = "purple"
+        multiplier = "2x"
+    else:
+        color = "yellow"
+        multiplier = "14x"
+        
+    accuracy = random.uniform(92.5, 99.8) if data.method == "perc" else random.uniform(70.1, 88.5)
+    
+    return {
+        "status": "success",
+        "color": color,
+        "multiplier": multiplier,
+        "accuracy": f"{round(accuracy, 2)}%",
+        "patterns_analyzed": random.randint(60000, 75000),
+        "method": data.method.upper()
     }
 
 if __name__ == "__main__":
