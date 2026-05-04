@@ -75,7 +75,8 @@ async def proxy_get(path: str, token: str) -> dict:
     url = f"{PROXY_URL}{path}"
     async with httpx.AsyncClient(timeout=15.0) as client:
         r = await client.get(url, headers=build_headers(token))
-        r.raise_for_status()
+        if r.status_code != 200:
+            raise Exception(f"HTTP {r.status_code}: {r.text}")
         return r.json()
 
 async def proxy_post(path: str, token: str, payload: dict) -> dict:
@@ -83,7 +84,8 @@ async def proxy_post(path: str, token: str, payload: dict) -> dict:
     url = f"{PROXY_URL}{path}"
     async with httpx.AsyncClient(timeout=15.0) as client:
         r = await client.post(url, headers=build_headers(token), json=payload)
-        r.raise_for_status()
+        if r.status_code != 200:
+            raise Exception(f"HTTP {r.status_code}: {r.text}")
         return r.json()
 
 def parse_game(g: dict) -> dict:
