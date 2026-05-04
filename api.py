@@ -80,11 +80,17 @@ def analyze_patterns(games: list) -> dict:
     even_nonces = sum(1 for g in games if g.get("nonce", 0) % 2 == 0)
     nonce_parity = "even" if even_nonces > total / 2 else "odd"
     
+    recent_losses = 0
+    for g in games[:3]:
+        if float(g.get("profit", 0)) <= 0:
+            recent_losses += 1
+    
     return {
         "total_games": total,
         "win_rate": round(wins / total * 100, 1),
         "most_common_mines": common_mines,
         "nonce_parity_bias": nonce_parity,
+        "rig_warning": recent_losses >= 2
     }
 
 def generate_grid(uuid: str, nonce: int, bet: float, mines: int, patterns: dict) -> list:
@@ -235,7 +241,8 @@ async def predict(data: PredictionRequest):
         "confidence": f"{confidence}%",
         "reaction_time": f"{round(time.time() - start, 4)}s",
         "pattern_bias_applied": bool(patterns),
-        "game_info": active
+        "game_info": active,
+        "rig_warning": patterns.get("rig_warning", False)
     }
 
 if __name__ == "__main__":
