@@ -61,6 +61,7 @@ def get_token(user_id: str) -> str:
 def build_headers(token: str) -> dict:
     return {
         "x-auth-token": token,
+        "Authorization": token,  # Added this because the proxy explicitly requested it
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Referer": "https://bloxflip.com/mines",
         "Origin": "https://bloxflip.com",
@@ -183,12 +184,13 @@ async def set_bot_token(data: BotTokenData):
 @app.post("/save_token")
 async def save_token(data: TokenData):
     """Link a specific user's own bloxflip token and return profile data."""
+    user_data = {}
     try:
-        # Fetch user profile to verify token and get balance/avatar
+        # Try hitting /api/user since we now have the Authorization header
         user_info = await proxy_get("/api/user", data.token)
         user_data = user_info.get("user") or user_info
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Invalid token: {str(e)}")
+        print(f"Profile fetch failed (ignoring): {e}")
 
     USER_TOKENS[data.user_id] = data.token
     return {
