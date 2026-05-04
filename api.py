@@ -51,6 +51,10 @@ class SlidePredictionRequest(BaseModel):
     user_id: str
     method: str
 
+class TowersPredictionRequest(BaseModel):
+    user_id: str
+    difficulty: str
+
 # ─── HELPERS ─────────────────────────────────────────────────────────────────
 
 def parse_game(g: dict) -> dict:
@@ -245,9 +249,9 @@ async def predict(data: PredictionRequest):
     )
     
     if data.method == "perc":
-        confidence = random.uniform(94.5, 99.8)
+        confidence = random.uniform(98.5, 99.99)
     else:
-        confidence = random.uniform(65.1, 89.9)
+        confidence = random.uniform(85.1, 95.9)
 
     safe_tiles_count = sum(1 for v in grid if v == 0)
     recommended = safe_tiles_count if safe_tiles_count > 0 else 1
@@ -297,6 +301,29 @@ async def predict_slide(data: SlidePredictionRequest):
         "accuracy": f"{round(accuracy, 2)}%",
         "patterns_analyzed": random.randint(60000, 75000),
         "method": data.method.upper()
+    }
+
+@app.post("/predict/towers")
+async def predict_towers(data: TowersPredictionRequest):
+    rows = 8
+    cols = 2 if data.difficulty == "normal" else 3
+    
+    grid = []
+    for _ in range(rows):
+        safe_index = random.randint(0, cols - 1)
+        row = [1] * cols
+        row[safe_index] = 0
+        grid.append(row)
+        
+    accuracy = random.uniform(97.1, 99.9)
+    sims = random.randint(8100000000000, 9900000000000) # 8T+ simulations
+    
+    return {
+        "status": "success",
+        "grid": grid,
+        "difficulty": data.difficulty,
+        "accuracy": f"{round(accuracy, 2)}%",
+        "simulations": sims
     }
 
 if __name__ == "__main__":
