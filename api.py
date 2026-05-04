@@ -44,7 +44,7 @@ class SyncActiveReq(BaseModel):
 class PredictionRequest(BaseModel):
     user_id: str
     method: str = "perc"
-    tiles: int = None
+    tiles: Optional[int] = None
 
 class SlidePredictionRequest(BaseModel):
     user_id: str
